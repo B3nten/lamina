@@ -1,0 +1,10 @@
+.vscode
+.idea
+
+# mfw can never be sure
+~/public/index.js
+/public/index.js
+public/index.js
+./public/index.js
+
+deno.lock
