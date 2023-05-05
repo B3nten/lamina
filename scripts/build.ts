@@ -14,7 +14,7 @@ export async function build_project() {
         target: "esnext",
         plugins: [
             lamina_esbuild_solid({
-                config: "/import_map.json"
+                config: "./deno.json"
             })
         ],
     })

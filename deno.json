@@ -8,12 +8,11 @@
     "jsx": "preserve",
     "jsxImportSource": "npm:solid-js"
   },
-  "lock": "false",
+  "lock": false,
   "tasks": {
     "build": "deno run --allow-env --allow-write --allow-read --allow-run --allow-sys --allow-net './scripts/build.ts'",
     "serve": "deno run --allow-env --allow-write --allow-read --allow-net --allow-run './scripts/serve.ts' --watch"
   },
-
   "imports": {
     "solid-js": "https://esm.sh/solid-js",
     "solid-js/web": "https://esm.sh/solid-js/web",

@@ -2,6 +2,7 @@ import type { Plugin } from "https://deno.land/x/esbuild@v0.17.15/mod.d.ts";
 import {
   fromFileUrl,
   toFileUrl,
+  join
 } from "https://deno.land/std@0.185.0/path/mod.ts";
 import {
   ImportMap,
@@ -9,6 +10,8 @@ import {
   resolveModuleSpecifier,
 } from "https://deno.land/x/importmap@0.2.1/mod.ts";
 import * as JSONC from "https://deno.land/std@0.185.0/jsonc/mod.ts";
+
+const namespace = "lamina::solidjs";
 
 export interface EsbuildResolution {
   namespace: string;
@@ -52,16 +55,11 @@ async function readDenoConfig(path: string): Promise<DenoConfig> {
   ) {
     throw new Error(`Deno config at ${path} has invalid "scopes" key`);
   }
-  if ("lock" in res && typeof res.lock !== "string") {
-    throw new Error(`Deno config at ${path} has invalid "lock" key`);
-  }
   if ("importMap" in res && typeof res.importMap !== "string") {
     throw new Error(`Deno config at ${path} has invalid "importMap" key`);
   }
   return res;
 }
-
-const namespace = "lamina::solidjs";
 
 export type Options = {
   config: string;
@@ -73,7 +71,7 @@ export const lamina_esbuild_solid = (options: Options = {
   name: namespace,
   setup(build) {
     let importMap: ImportMap | null = null;
-    const configPath = Deno.cwd() + options.config
+    const configPath = join(Deno.cwd(), options.config)
 
     build.onStart(async function onStart() {
       let importMapURL: string | undefined;
@@ -81,24 +79,17 @@ export const lamina_esbuild_solid = (options: Options = {
         options.config !== undefined
       ) {
         const config = await readDenoConfig(configPath);
-        // If `imports` or `scopes` are specified, use the config file as the
-        // import map directly.
         if (config.imports !== undefined || config.scopes !== undefined) {
           importMap = resolveImportMap(
             // deno-lint-ignore no-explicit-any
-            config as any,
+            { imports: config.imports, scopes: config.scopes } as any,
             toFileUrl(configPath),
           );
-          
-          
         } else if (config.importMap !== undefined) {
-          // Otherwise, use the import map URL specified in the config file
           importMapURL =
             new URL(config.importMap, toFileUrl(configPath)).href;
         }
       }
-
-      // If we have an import map URL, fetch it and parse it.
       if (importMapURL) {
         const resp = await fetch(importMapURL);
         const data = await resp.json();
@@ -135,8 +126,6 @@ export const lamina_esbuild_solid = (options: Options = {
         kind: args.kind,
       });
     });
-
-    
 
   },
 });
