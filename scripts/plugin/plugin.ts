@@ -1,8 +1,13 @@
 import type { Plugin } from "https://deno.land/x/esbuild@v0.17.15/mod.d.ts";
+import esbuild from "esbuild";
+import {
+  esbuildResolutionToURL,
+  Loader,
+} from "https://raw.githubusercontent.com/lucacasonato/esbuild_deno_loader/main/src/shared.ts";
 import {
   fromFileUrl,
+  join,
   toFileUrl,
-  join
 } from "https://deno.land/std@0.185.0/path/mod.ts";
 import {
   ImportMap,
@@ -10,6 +15,7 @@ import {
   resolveModuleSpecifier,
 } from "https://deno.land/x/importmap@0.2.1/mod.ts";
 import * as JSONC from "https://deno.land/std@0.185.0/jsonc/mod.ts";
+import { NativeLoader } from "./loader.ts";
 
 const namespace = "lamina::solidjs";
 
@@ -19,10 +25,11 @@ export interface EsbuildResolution {
 }
 
 interface DenoConfig {
-  imports?: unknown;
+  imports?: Record<string, string>
   scopes?: unknown;
   lock?: string;
   importMap?: string;
+  client_overrides?: Record<string, string>
 }
 
 export function urlToEsbuildResolution(url: URL): EsbuildResolution {
@@ -63,38 +70,47 @@ async function readDenoConfig(path: string): Promise<DenoConfig> {
 
 export type Options = {
   config: string;
+  target: "deno" | "browser"
 };
 
 export const lamina_esbuild_solid = (options: Options = {
-  config: import.meta.resolve("./deno.json"),
+  config: "",
+  target: "deno",
 }): Plugin => ({
   name: namespace,
   setup(build) {
     let importMap: ImportMap | null = null;
-    const configPath = join(Deno.cwd(), options.config)
+    const configPath = join(Deno.cwd(), options.config);
+    let loaderImpl: Loader;
 
     build.onStart(async function onStart() {
-      let importMapURL: string | undefined;
       if (
         options.config !== undefined
       ) {
         const config = await readDenoConfig(configPath);
+        if(options.target === "browser" && config.client_overrides && config.imports){
+          for(const key of Object.keys(config.imports)){
+            if(key in config.client_overrides){
+              config.imports[key] = config.client_overrides[key]
+            }
+          }
+        }
         if (config.imports !== undefined || config.scopes !== undefined) {
           importMap = resolveImportMap(
             // deno-lint-ignore no-explicit-any
             { imports: config.imports, scopes: config.scopes } as any,
             toFileUrl(configPath),
           );
-        } else if (config.importMap !== undefined) {
-          importMapURL =
-            new URL(config.importMap, toFileUrl(configPath)).href;
-        }
+        } 
       }
-      if (importMapURL) {
-        const resp = await fetch(importMapURL);
-        const data = await resp.json();
-        importMap = resolveImportMap(data, new URL(resp.url));
-      }
+
+   
+      loaderImpl = new NativeLoader({
+        infoOptions: {
+          config: configPath,
+        },
+        ssr: options.target === "deno"
+      });
     });
 
     build.onResolve({ filter: /.*/ }, async function onResolve(args) {
@@ -127,5 +143,37 @@ export const lamina_esbuild_solid = (options: Options = {
       });
     });
 
+    async function onResolve(
+      args: esbuild.OnResolveArgs,
+    ): Promise<esbuild.OnResolveResult | null | undefined> {
+      const specifier = esbuildResolutionToURL(args);
+
+      // Once we have an absolute path, let the loader resolver figure out
+      // what to do with it.
+      const res = await loaderImpl.resolve(specifier);
+
+      switch (res.kind) {
+        case "esm": {
+          const { specifier } = res;
+          return urlToEsbuildResolution(specifier);
+        }
+      }
+    }
+    build.onResolve({ filter: /.*/, namespace: "file" }, onResolve);
+    build.onResolve({ filter: /.*/, namespace: "http" }, onResolve);
+    build.onResolve({ filter: /.*/, namespace: "https" }, onResolve);
+    build.onResolve({ filter: /.*/, namespace: "data" }, onResolve);
+
+    function onLoad(
+      args: esbuild.OnLoadArgs,
+    ): Promise<esbuild.OnLoadResult | null> {
+      const specifier = esbuildResolutionToURL(args);
+      return loaderImpl.loadEsm(specifier);
+    }
+
+    build.onLoad({ filter: /.*/, namespace: "file" }, onLoad);
+    build.onLoad({ filter: /.*/, namespace: "http" }, onLoad);
+    build.onLoad({ filter: /.*/, namespace: "https" }, onLoad);
+    build.onLoad({ filter: /.*/, namespace: "data" }, onLoad);
   },
 });
